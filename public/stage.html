@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>走词台 · 观众屏</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  html, body { background: #000; height: 100%; overflow: hidden; }
+  .stage-wrap {
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    padding: 4vh 6vw;
+  }
+  .cue {
+    color: #f5f2e8;
+    font-size: clamp(2rem, 7.5vw, 7rem);
+    line-height: 1.4;
+    font-weight: 600;
+    text-align: center;
+    letter-spacing: .04em;
+    text-shadow: 0 0 40px rgba(255,255,255,.08);
+    transition: opacity .18s ease-out;
+    word-break: break-word;
+    white-space: pre-wrap;
+  }
+  .cue.flash { opacity: .25; }
+  .hud {
+    position: fixed; left: 14px; bottom: 10px;
+    color: #5b6272; font-size: .78rem;
+    display: flex; align-items: center; gap: 8px;
+    user-select: none;
+  }
+  .hud .dot { width: 7px; height: 7px; }
+  .standby {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    color: #333844; font-size: clamp(1rem, 2vw, 1.6rem); letter-spacing: .3em;
+  }
+</style>
+</head>
+<body>
+<div class="stage-wrap">
+  <div class="cue" id="cue"></div>
+</div>
+<div class="standby" id="standby">待　命</div>
+<div class="hud">
+  <span class="dot" id="connDot"></span>
+  <span id="connLabel">—</span>
+  <span id="meta"></span>
+</div>
+
+<script src="/common.js"></script>
+<script>
+const showId = qs('show');
+const cue = document.getElementById('cue');
+const standby = document.getElementById('standby');
+let lastShown = null;
+
+function render(s) {
+  document.title = s.current_text ? `${s.current_text} · 走词台` : '走词台 · 观众屏';
+  const text = (s.status === 'performing' && s.current_text != null) ? s.current_text : '';
+  standby.style.display = text ? 'none' : '';
+  standby.textContent = s.status === 'ended' ? '演　出　结　束' : (s.status === 'performing' ? '— 清 屏 —' : '待　命');
+
+  if (text !== lastShown) {
+    // 切换提示：轻微闪烁，避免观众屏误以为卡顿
+    cue.classList.add('flash');
+    setTimeout(() => {
+      cue.textContent = text;
+      cue.classList.remove('flash');
+    }, text == null || lastShown == null ? 0 : 90);
+    lastShown = text;
+  }
+  const v = s.performing_version ? `v${s.performing_version.version_no}` : '-';
+  document.getElementById('meta').textContent =
+    `${esc(s.show_name)} · ${v} · ${s.position == null ? '清屏' : '#' + s.position} · rev${s.rev}`;
+}
+
+// 观众端无需任何权限；断线自动重连，重连首帧即恢复最新已确认状态（含服务重启后）
+const conn = connectShow(showId, { onState: render });
+conn.setIndicator = (label, on) => {
+  document.getElementById('connLabel').textContent = label;
+  document.getElementById('connDot').className = 'dot ' + (on ? 'on' : 'off');
+};
+
+(async function init() {
+  if (!showId) { cue.textContent = '缺少场次参数'; return; }
+  try {
+    const { state } = await api('GET', `/api/shows/${showId}`);
+    render(state);
+  } catch (e) {
+    standby.textContent = '场次加载失败';
+  }
+})();
+</script>
+</body>
+</html>

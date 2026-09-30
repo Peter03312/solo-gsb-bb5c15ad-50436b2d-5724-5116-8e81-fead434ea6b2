@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>走词台 · 场次列表</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="topbar">
+  <span class="brand">🎭 走词台</span>
+  <span class="spacer"></span>
+  <span class="muted small">小剧场网页提词系统</span>
+</div>
+<div class="container">
+  <h1>场次</h1>
+  <p class="sub">编辑者录入字幕并发布演出版本；操作员在演出时取得限时控制权推进字幕；观众页实时显示。</p>
+
+  <div class="panel">
+    <h2>新建场次</h2>
+    <form id="createForm" class="row">
+      <input type="text" id="name" placeholder="例如：10 月 1 日晚场" required style="flex:1; min-width:220px">
+      <button class="primary" type="submit">创建场次</button>
+    </form>
+  </div>
+
+  <div class="panel">
+    <h2>全部场次</h2>
+    <table>
+      <thead>
+        <tr><th>名称</th><th>状态</th><th>已发布版本</th><th>控制权</th><th>入口</th></tr>
+      </thead>
+      <tbody id="showList">
+        <tr><td colspan="5" class="muted">加载中…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script src="/common.js"></script>
+<script>
+const statusPill = (s) => {
+  if (s === 'performing') return '<span class="pill live">演出中</span>';
+  if (s === 'ended') return '<span class="pill ended">已结束</span>';
+  return '<span class="pill idle">未开始</span>';
+};
+
+async function load() {
+  const { shows } = await api('GET', '/api/shows');
+  const tbody = document.getElementById('showList');
+  if (!shows.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="muted">还没有场次，先在上方创建一个。</td></tr>';
+    return;
+  }
+  const t = Date.now();
+  tbody.innerHTML = shows.map((s) => {
+    const locked = s.control_until && s.control_until > t;
+    return `<tr>
+      <td><strong>${esc(s.name)}</strong></td>
+      <td>${statusPill(s.status)}</td>
+      <td>${s.latest_version_no ? 'v' + s.latest_version_no : '<span class="muted">无</span>'}</td>
+      <td>${locked ? `<span class="pill lock">${esc(s.controller_name || '有人')}</span>` : '<span class="muted">空闲</span>'}</td>
+      <td>
+        <a href="/editor.html?show=${s.id}">编辑</a> ·
+        <a href="/operator.html?show=${s.id}">操作</a> ·
+        <a href="/stage.html?show=${s.id}" target="_blank">观众屏</a>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+document.getElementById('createForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = document.getElementById('name').value.trim();
+  if (!name) return;
+  try {
+    const { show } = await api('POST', '/api/shows', { name });
+    location.href = '/editor.html?show=' + show.id;
+  } catch (err) { toast(err.message, 'error'); }
+});
+
+load().catch((e) => toast(e.message, 'error'));
+</script>
+</body>
+</html>

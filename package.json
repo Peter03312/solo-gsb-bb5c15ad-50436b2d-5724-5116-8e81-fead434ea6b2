@@ -1,0 +1,17 @@
+{
+  "name": "cuedesk",
+  "version": "1.0.0",
+  "description": "小剧场网页走词台：编辑发布、限时控制权、实时字幕推送",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
+  }
+}

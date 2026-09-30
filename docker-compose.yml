@@ -1,0 +1,19 @@
+services:
+  cuedesk:
+    build: .
+    image: cuedesk:latest
+    container_name: cuedesk
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      # 监听端口（容器内固定 8080；宿主机端口用左侧 PORT 改）
+      PORT: "8080"
+      # 控制权有效期（秒）：过期后同场次其他人可接管
+      CONTROL_TTL_SECONDS: "${CONTROL_TTL_SECONDS:-60}"
+    volumes:
+      # SQLite 数据库（含 WAL）持久化到宿主机，服务/容器重启后状态不丢
+      - cuedesk-data:/data
+
+volumes:
+  cuedesk-data:
