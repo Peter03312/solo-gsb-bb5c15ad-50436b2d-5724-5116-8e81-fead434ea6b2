@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>小剧场走词台</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="topbar">
+  <h1>🎭 小剧场网页走词台</h1>
+  <span class="spacer"></span>
+  <span class="badge">无需外部服务 · 本地实时</span>
+</div>
+
+<div class="container">
+  <div class="card">
+    <h2>新建场次</h2>
+    <div class="row">
+      <div style="flex:3">
+        <label for="new-name">场次名称（可留空）</label>
+        <input type="text" id="new-name" placeholder="如：9月30日 晚场《雷雨》">
+      </div>
+      <div style="flex:0 0 auto">
+        <button id="new-btn">创建场次</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>场次列表</h2>
+    <ul class="session-list" id="session-list"><li class="muted small">加载中…</li></ul>
+  </div>
+
+  <p class="muted small">
+    角色说明：<b>编辑者</b>在编辑页录入有序字幕并发布演出版本（演出中的字幕不会被后续修改影响）；
+    <b>操作员</b>取得限时控制权后推进/回退/清屏；<b>观众页</b>投影或演员自行打开，实时显示当前字幕。
+  </p>
+</div>
+
+<script src="/common.js"></script>
+<script>
+'use strict';
+
+async function loadSessions() {
+  const list = document.getElementById('session-list');
+  try {
+    const { sessions } = await Api.get('/api/sessions');
+    if (!sessions.length) {
+      list.innerHTML = '<li class="muted small">还没有场次，先在上方创建一个。</li>';
+      return;
+    }
+    list.innerHTML = sessions.map((s) => `
+      <li>
+        <div>
+          <div class="sname">${esc(s.name)}</div>
+          <div class="muted small">${fmtTime(s.createdAt)} · <code>${s.id}</code></div>
+        </div>
+        <div class="links">
+          <a href="/editor.html?sid=${s.id}">编辑者页</a>
+          <a href="/operator.html?sid=${s.id}">操作员页</a>
+          <a href="/audience.html?sid=${s.id}" target="_blank">观众页</a>
+        </div>
+      </li>`).join('');
+  } catch (err) {
+    list.innerHTML = `<li class="muted small">加载失败：${esc(err.message)}</li>`;
+  }
+}
+
+document.getElementById('new-btn').addEventListener('click', async () => {
+  const name = document.getElementById('new-name').value;
+  try {
+    const s = await Api.post('/api/sessions', { name });
+    toast(`已创建场次「${s.name}」`, 'ok');
+    document.getElementById('new-name').value = '';
+    loadSessions();
+  } catch (err) {
+    toast(err.message);
+  }
+});
+
+loadSessions();
+</script>
+</body>
+</html>

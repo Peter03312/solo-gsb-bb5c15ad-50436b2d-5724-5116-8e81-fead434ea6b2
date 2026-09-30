@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>观众 · 走词台</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body class="audience">
+  <div class="aud-stage cleared" id="stage">正在连接走词台…</div>
+  <div class="aud-hud"><span id="conn-pill" class="conn-pill connecting">连接中…</span></div>
+  <div class="aud-seq" id="seq-hud"></div>
+
+<script src="/common.js"></script>
+<script>
+'use strict';
+
+const sid = Sess.id;
+if (!sid) location.replace('/');
+
+const stage = document.getElementById('stage');
+const seqHud = document.getElementById('seq-hud');
+
+function render(st) {
+  if (st && st.current) {
+    stage.classList.remove('cleared');
+    stage.textContent = st.current.text;
+    seqHud.textContent = `v${st.version ? st.version.versionNo : '-'} · ${st.pos}/${st.total} · #${st.current.seq}`;
+    document.title = `▶ ${st.current.text.slice(0, 20)}`;
+  } else {
+    stage.classList.add('cleared');
+    stage.textContent = st && st.activeVersionId ? '— 清屏 —' : '等待演出开始…';
+    seqHud.textContent = '';
+    document.title = '观众 · 走词台';
+  }
+}
+
+// 断线自动重连；重连后服务器 hello 立即下发最新“已确认”状态，
+// 服务重启后同样从 SQLite 恢复。
+connectWS({ onState: render });
+</script>
+</body>
+</html>

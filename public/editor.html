@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>编辑者 · 走词台</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="topbar">
+  <h1>📝 编辑者页 <span class="session-name" id="s-name"></span></h1>
+  <span class="spacer"></span>
+  <span id="conn-pill" class="conn-pill connecting">连接中…</span>
+  <nav>
+    <a href="/">场次首页</a>
+    <a href="/operator.html?sid=" id="nav-op">操作员页</a>
+    <a href="/audience.html?sid=" id="nav-aud" target="_blank">观众页</a>
+  </nav>
+</div>
+
+<div class="container">
+  <div class="card">
+    <h2>草稿字幕（发布后的修改仅进入草稿，不影响正在演出的版本）</h2>
+    <table class="entries">
+      <thead>
+        <tr><th class="col-seq">序号</th><th>字幕内容</th><th class="col-del"></th></tr>
+      </thead>
+      <tbody id="entry-body"></tbody>
+    </table>
+    <div class="row" style="margin-top:12px">
+      <div style="flex:0 0 auto"><button class="ghost" id="add-btn">＋ 添加一行</button></div>
+      <div class="spacer" style="flex:1"></div>
+      <div style="flex:0 0 auto"><button class="ghost" id="save-btn">保存草稿</button></div>
+      <div style="flex:0 0 auto"><button id="publish-btn">发布为演出版本</button></div>
+    </div>
+    <p class="muted small" style="margin-bottom:0">
+      规则：序号必须为正整数且不可重复；字幕内容不能为空；空草稿不能发布。
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>已发布版本</h2>
+    <ul class="ver-list" id="ver-list"><li class="muted small">加载中…</li></ul>
+    <p class="muted small" id="live-note" style="margin-bottom:0"></p>
+  </div>
+</div>
+
+<script src="/common.js"></script>
+<script>
+'use strict';
+
+const sid = Sess.id;
+if (!sid) { location.replace('/'); throw new Error('no sid'); }
+document.getElementById('nav-op').href = '/operator.html?sid=' + sid;
+document.getElementById('nav-aud').href = '/audience.html?sid=' + sid;
+
+let liveState = null;
+
+const tbody = document.getElementById('entry-body');
+
+function rowHtml(seq, text) {
+  const tr = document.createElement('tr');
+  tr.className = 'entry-row';
+  tr.innerHTML = `
+    <td class="col-seq"><input type="number" min="1" step="1" class="f-seq" value="${esc(seq)}"></td>
+    <td><textarea rows="1" class="f-text" placeholder="输入字幕内容…">${esc(text)}</textarea></td>
+    <td class="col-del"><button class="del-btn" title="删除此行">✕</button></td>`;
+  tr.querySelector('.del-btn').addEventListener('click', () => { tr.remove(); });
+  return tr;
+}
+
+function addRow(seq = '', text = '') {
+  tbody.appendChild(rowHtml(seq, text));
+}
+
+function readRows() {
+  return [...document.querySelectorAll('.entry-row')].map((tr) => ({
+    seq: tr.querySelector('.f-seq').value,
+    text: tr.querySelector('.f-text').value,
+  }));
+}
+
+document.getElementById('add-btn').addEventListener('click', () => addRow());
+
+async function loadDraft() {
+  const { entries } = await Api.get(`/api/sessions/${sid}/draft`);
+  tbody.innerHTML = '';
+  entries.forEach((e) => addRow(e.seq, e.text));
+  if (!entries.length) addRow();
+}
+
+async function loadVersions() {
+  const [{ versions }, detail] = await Promise.all([
+    Api.get(`/api/sessions/${sid}/versions`),
+    Api.get(`/api/sessions/${sid}`),
+  ]);
+  document.getElementById('s-name').textContent = '· ' + detail.name;
+  liveState = detail.state;
+  const ul = document.getElementById('ver-list');
+  if (!versions.length) {
+    ul.innerHTML = '<li class="muted small">还没有发布过版本。</li>';
+  } else {
+    ul.innerHTML = versions.map((v) => {
+      const active = liveState && liveState.activeVersionId === v.id;
+      return `<li>
+        <span class="vno">v${v.versionNo}</span>
+        <span>${fmtTime(v.publishedAt)} · ${v.count} 条</span>
+        ${active ? '<span class="badge live">● 演出中</span>' : ''}
+      </li>`;
+    }).join('');
+  }
+  const note = document.getElementById('live-note');
+  if (liveState && liveState.activeVersionId) {
+    note.textContent = `当前舞台使用 v${liveState.version.versionNo}；演出进行中即使发布新版本，舞台仍保持原版本，直到操作员结束演出。`;
+  } else {
+    note.textContent = '当前没有进行中的演出；操作员可在操作员页载入任一已发布版本。';
+  }
+}
+
+document.getElementById('save-btn').addEventListener('click', async () => {
+  try {
+    const r = await Api.put(`/api/sessions/${sid}/draft`, { entries: readRows() });
+    toast(`草稿已保存（${r.count} 条）`, 'ok');
+    await loadDraft();
+  } catch (err) { toast(err.message); }
+});
+
+document.getElementById('publish-btn').addEventListener('click', async () => {
+  try {
+    const v = await Api.post(`/api/sessions/${sid}/publish`, { entries: readRows() });
+    toast(`已发布 v${v.versionNo}（${v.count} 条）。草稿已清空，可继续编排下一版。`, 'ok');
+    await Promise.all([loadDraft(), loadVersions()]);
+  } catch (err) { toast(err.message); }
+});
+
+// 操作员载入/结束演出时实时更新“演出中”标记
+connectWS({
+  onState: (st) => { liveState = st; loadVersions(); },
+});
+
+(async function init() {
+  try {
+    await Promise.all([loadDraft(), loadVersions()]);
+  } catch (err) { toast(err.message); }
+})();
+</script>
+</body>
+</html>

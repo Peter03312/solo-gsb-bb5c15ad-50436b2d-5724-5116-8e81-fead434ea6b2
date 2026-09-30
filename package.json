@@ -1,0 +1,16 @@
+{
+  "name": "theater-prompter",
+  "version": "1.0.0",
+  "description": "小剧场网页走词台：有序字幕编辑发布、限时控制权操作、观众实时看词",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node --experimental-sqlite server.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

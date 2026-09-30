@@ -1,0 +1,26 @@
+services:
+  prompter:
+    build: .
+    image: theater-prompter:latest
+    container_name: theater-prompter
+    restart: unless-stopped
+    ports:
+      # 宿主机端口:容器端口；如被占用可改成 "8081:8080"
+      - "8080:8080"
+    environment:
+      # 默认控制权时长（秒），操作员取控制权时也可自选 10~300 秒
+      CONTROL_TTL: "30"
+      # 容器内数据库位置（对应下方持久化卷）
+      DB_PATH: "/data/prompter.db"
+    volumes:
+      # SQLite 数据持久化：容器删除/重建后场次、版本、演出状态全部保留
+      - prompter-data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  prompter-data:

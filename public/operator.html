@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>操作员 · 走词台</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="topbar">
+  <h1>🎛️ 操作员页 <span class="session-name" id="s-name"></span></h1>
+  <span class="spacer"></span>
+  <span id="conn-pill" class="conn-pill connecting">连接中…</span>
+  <nav>
+    <a href="/">场次首页</a>
+    <a href="/editor.html?sid=" id="nav-ed">编辑者页</a>
+    <a href="/audience.html?sid=" id="nav-aud" target="_blank">观众页</a>
+  </nav>
+</div>
+
+<div class="container">
+
+  <div class="card">
+    <h2>控制权（同一场次同一时间仅一人持有，到期后他人可接管）</h2>
+    <div class="control-box">
+      <div style="flex:2;min-width:180px">
+        <label for="op-name">操作员名称</label>
+        <input type="text" id="op-name" maxlength="40" placeholder="如：场务小王">
+      </div>
+      <div style="flex:1;min-width:120px">
+        <label for="op-ttl">控制时长</label>
+        <select id="op-ttl">
+          <option value="30">30 秒</option>
+          <option value="60">1 分钟</option>
+          <option value="120">2 分钟</option>
+          <option value="300">5 分钟</option>
+        </select>
+      </div>
+      <div style="flex:0 0 auto">
+        <button id="grant-btn">取得控制权</button>
+      </div>
+      <div id="hold-panel" style="display:none;align-items:center;gap:14px;flex:0 0 auto">
+        <div class="countdown" id="countdown">--</div>
+        <button class="ghost" id="renew-btn">续期</button>
+        <button class="ghost danger" id="release-btn">释放</button>
+      </div>
+    </div>
+    <p class="muted small" id="ctrl-status" style="margin-bottom:0">当前无人持有控制权。</p>
+  </div>
+
+  <div class="card">
+    <h2>舞台操作
+      <span class="sv-pill" id="sv-pill" style="float:right">页面所见状态版本 v-</span>
+    </h2>
+    <div class="op-grid">
+      <button class="big" id="btn-back" disabled>⏮ 回退</button>
+      <button class="big" id="btn-advance" disabled>推进 ⏭</button>
+      <button class="big ghost span2" id="btn-clear" disabled>🧹 清屏</button>
+    </div>
+    <div class="stage-preview" id="preview"><span class="cleared">（舞台预览）</span></div>
+    <div class="pos-indicator" id="pos-indicator"></div>
+  </div>
+
+  <div class="card">
+    <h2>演出版本</h2>
+    <div class="row">
+      <div style="flex:2">
+        <label for="ver-select">选择已发布版本载入（演出中不可切换，需先结束演出）</label>
+        <select id="ver-select"></select>
+      </div>
+      <div style="flex:0 0 auto">
+        <button id="load-btn" disabled>载入版本</button>
+      </div>
+      <div style="flex:0 0 auto">
+        <button class="danger" id="end-btn" disabled>结束演出</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/common.js"></script>
+<script>
+'use strict';
+
+const sid = Sess.id;
+if (!sid) { location.replace('/'); throw new Error('no sid'); }
+document.getElementById('nav-ed').href = '/editor.html?sid=' + sid;
+document.getElementById('nav-aud').href = '/audience.html?sid=' + sid;
+
+const lsKey = (k) => `prompter:${sid}:${k}`;
+let myToken = localStorage.getItem(lsKey('token')) || null;
+let myName = localStorage.getItem(lsKey('name')) || '';
+document.getElementById('op-name').value = myName;
+
+let state = null;        // 页面当前所见的“已确认状态”
+let control = null;      // {holder, expiresAt}
+let versions = [];
+let opInFlight = false;  // 防重复提交
+let cdTimer = null;
+
+const $ = (id) => document.getElementById(id);
+
+// ------------------------------------------------------------ 状态渲染
+
+function imHolder() {
+  return !!(myToken && control && control.holder && control.holder === $('op-name').value.trim());
+}
+
+function renderControl() {
+  const held = !!control && !!control.holder;
+  const mine = imHolder();
+  $('grant-btn').textContent = held ? '尝试接管控制权' : '取得控制权';
+  $('hold-panel').style.display = mine ? 'flex' : 'none';
+  $('grant-btn').disabled = mine;
+  $('op-name').disabled = mine;
+
+  const st = $('ctrl-status');
+  if (mine) {
+    st.innerHTML = `你正在持有控制权，到期前他人无法操作。`;
+  } else if (held) {
+    st.innerHTML = `控制权由「<b>${esc(control.holder)}</b>」持有，到期后可接管。`;
+  } else {
+    st.textContent = '当前无人持有控制权。';
+  }
+  renderButtons();
+  startCountdown();
+}
+
+function startCountdown() {
+  clearInterval(cdTimer);
+  const cd = $('countdown');
+  if (!imHolder() || !control.expiresAt) return;
+  const tick = () => {
+    const remainMs = control.expiresAt - Date.now();
+    if (remainMs <= 0) {
+      cd.textContent = '已到期';
+      cd.classList.add('warn');
+      clearInterval(cdTimer);
+      myToken = null;
+      localStorage.removeItem(lsKey('token'));
+      renderControl();
+      return;
+    }
+    const s = Math.ceil(remainMs / 1000);
+    cd.textContent = `${s}s`;
+    cd.classList.toggle('warn', s <= 5);
+  };
+  tick();
+  cdTimer = setInterval(tick, 200);
+}
+
+function renderState(st) {
+  state = st;
+  $('sv-pill').textContent = `页面所见状态版本 v${st.stateVersion}`;
+  const preview = $('preview');
+  if (st.current) {
+    preview.classList.remove('cleared');
+    preview.textContent = st.current.text;
+  } else {
+    preview.classList.add('cleared');
+    preview.textContent = st.activeVersionId
+      ? '（屏幕已清空）'
+      : (st.version === null ? '（尚未载入版本）' : '（舞台预览）');
+  }
+  if (st.activeVersionId && st.version) {
+    $('pos-indicator').textContent =
+      `v${st.version.versionNo} · ${st.pos == null ? '清屏' : `第 ${st.pos} / ${st.total} 条（序号 ${st.current ? st.current.seq : '-'}）`}`;
+  } else {
+    $('pos-indicator').textContent = '未载入版本（结束演出状态）';
+  }
+  renderButtons();
+}
+
+function renderButtons() {
+  const mine = imHolder();
+  const live = !!(state && state.activeVersionId);
+  $('btn-advance').disabled = !mine || !live;
+  $('btn-back').disabled = !mine || !live;
+  $('btn-clear').disabled = !mine || !live;
+  $('load-btn').disabled = !mine || live;
+  $('end-btn').disabled = !mine || !live;
+  $('ver-select').disabled = live;
+}
+
+async function refreshVersions(selectId) {
+  const { versions: vs } = await Api.get(`/api/sessions/${sid}/versions`);
+  versions = vs;
+  const sel = $('ver-select');
+  if (!vs.length) {
+    sel.innerHTML = '<option value="">（暂无已发布版本，请编辑者先发布）</option>';
+  } else {
+    sel.innerHTML = vs.map((v) =>
+      `<option value="${v.id}" ${String(v.id) === String(selectId) ? 'selected' : ''}>v${v.versionNo} · ${v.count} 条 · ${fmtTime(v.publishedAt)}</option>`
+    ).join('');
+  }
+}
+
+// ------------------------------------------------------------ 操作
+
+async function doOp(action, extra) {
+  if (opInFlight) {
+    toast('上一个操作还在处理中，请勿重复点击', 'info');
+    return;
+  }
+  if (!imHolder()) { toast('你没有有效控制权，请先取得或接管控制权'); return; }
+  opInFlight = true;
+  renderButtons();
+  try {
+    const st = await Api.post(`/api/sessions/${sid}/ops`, {
+      action,
+      token: myToken,
+      stateVersion: state.stateVersion,
+      ...extra,
+    });
+    renderState(st); // 服务器确认后的最新状态
+  } catch (err) {
+    // STALE_STATE / CONTROL_* / 边界错误：明确提示，页面状态随后由 WS 推送校正
+    toast(err.message, err.code === 'STALE_STATE' || err.code === 'CONTROL_EXPIRED' ? 'info' : 'err');
+  } finally {
+    opInFlight = false;
+    renderButtons();
+  }
+}
+
+$('btn-advance').addEventListener('click', () => doOp('advance'));
+$('btn-back').addEventListener('click', () => doOp('back'));
+$('btn-clear').addEventListener('click', () => doOp('clear'));
+$('end-btn').addEventListener('click', () => {
+  if (confirm('确认结束当前演出？结束后可载入其他已发布版本。')) doOp('end');
+});
+$('load-btn').addEventListener('click', () => {
+  const vid = $('ver-select').value;
+  if (!vid) return toast('请先选择一个已发布版本');
+  doOp('load', { versionId: Number(vid) });
+});
+
+// ------------------------------------------------------------ 控制权
+
+$('grant-btn').addEventListener('click', async () => {
+  const operator = $('op-name').value.trim();
+  if (!operator) return toast('请填写操作员名称');
+  try {
+    const r = await Api.post(`/api/sessions/${sid}/control/grant`, {
+      operator, ttl: Number($('op-ttl').value),
+    });
+    myToken = r.token;
+    myName = operator;
+    localStorage.setItem(lsKey('token'), r.token);
+    localStorage.setItem(lsKey('name'), operator);
+    control = { holder: r.operator, expiresAt: r.expiresAt };
+    toast(`已取得控制权，有效期 ${r.ttl} 秒`, 'ok');
+    renderControl();
+  } catch (err) { toast(err.message); }
+});
+
+$('renew-btn').addEventListener('click', async () => {
+  try {
+    const r = await Api.post(`/api/sessions/${sid}/control/renew`, { token: myToken, ttl: Number($('op-ttl').value) });
+    control = { holder: myName, expiresAt: r.expiresAt };
+    toast(`已续期 ${r.ttl} 秒`, 'ok');
+    renderControl();
+  } catch (err) {
+    if (err.code === 'CONTROL_EXPIRED' || err.code === 'CONTROL_OTHER') {
+      myToken = null; localStorage.removeItem(lsKey('token'));
+    }
+    toast(err.message);
+  }
+});
+
+$('release-btn').addEventListener('click', async () => {
+  try {
+    await Api.post(`/api/sessions/${sid}/control/release`, { token: myToken });
+    myToken = null;
+    localStorage.removeItem(lsKey('token'));
+    control = { holder: null, expiresAt: null };
+    renderControl();
+    toast('已释放控制权', 'ok');
+  } catch (err) {
+    if (err.code === 'CONTROL_EXPIRED' || err.code === 'CONTROL_OTHER' || err.code === 'NO_CONTROL') {
+      myToken = null;
+      localStorage.removeItem(lsKey('token'));
+      control = { holder: null, expiresAt: null };
+      renderControl();
+    }
+    toast(err.message);
+  }
+});
+
+$('op-name').addEventListener('input', renderControl);
+
+// ------------------------------------------------------------ 实时连接
+
+connectWS({
+  onState: (st) => {
+    const wasLive = state && state.activeVersionId != null;
+    renderState(st);
+    // 演出刚结束：刷新版本下拉，演出期间编辑者可能已发布新版本
+    if (wasLive && st.activeVersionId == null) refreshVersions();
+  },
+  onControl: (c) => {
+    const oldHolder = control ? control.holder : null;
+    const wasMine = !!(myToken && oldHolder === myName);
+    const stillMine = !!(c.holder && c.holder === myName);
+    control = c;
+    if (myToken && wasMine && !stillMine) {
+      // 控制权过期、被释放或被他人接管：本地凭证作废
+      myToken = null;
+      localStorage.removeItem(lsKey('token'));
+      toast(oldHolder === myName ? '你的控制权已结束（过期/释放/被接管）' : '控制权已变更', 'info');
+    }
+    renderControl();
+  },
+});
+
+(async function init() {
+  try {
+    const detail = await Api.get(`/api/sessions/${sid}`);
+    $('s-name').textContent = '· ' + detail.name;
+    renderState(detail.state);
+    const { control: c } = await Api.get(`/api/sessions/${sid}/control`);
+    control = c;
+    // 若记录的持用人不是自己，本地 token 已无意义
+    if (myToken && c.holder && c.holder !== myName) {
+      myToken = null;
+      localStorage.removeItem(lsKey('token'));
+    }
+    await refreshVersions(detail.state.activeVersionId);
+    renderControl();
+  } catch (err) { toast(err.message); }
+})();
+</script>
+</body>
+</html>
